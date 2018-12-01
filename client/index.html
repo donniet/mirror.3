@@ -1,0 +1,139 @@
+<!doctype html>
+<html>
+<head>
+  <script type="text/javascript">
+    var data = {};
+
+    function clearObject(obj) {
+      for (let k in obj) {
+        if (obj.hasOwnProperty(k)) {
+          delete obj[k];
+        }
+      }
+    }
+
+    function ParseRequest(data, request) {
+      if (!request.path || request.path.length == 0) {
+        clearObject(data);
+        Object.assign(data, request.response);
+        console.log(data);
+        return true;
+      }
+
+      let stack = [data];
+      let remaining = [];
+      for (let i = 0; i < request.path.length; i++) {
+        let path = request.path[i];
+
+        if (stack[stack.length-1][path]) {
+          stack.push(stack[stack.length-1][path]);
+        } else {
+          remaining = request.path.slice(i);
+          break;
+        }
+      }
+
+      switch (request.method) {
+      case "GET":
+      case "POST":
+      case "PUT":
+        parseChange(stack, remaining, request);
+        break;
+      case "DELETE":
+        parseDelete(stack, remaining, request);
+        break;
+      default:
+        console.log('unrecognized method: ', request.method);
+        break;
+      }
+
+      console.log('data', data);
+    }
+
+    function parseChange(stack, remaining, request) {
+      leaf = stack[stack.length-1];
+      for (let i = 0; i < remaining.length - 1; i++) {
+        leaf[remaining[i]] = {};
+        leaf = leaf[remaining[i]];
+      }
+
+      if (request.method == "PUT") {
+        if (typeof leaf.length == "number") {
+          leaf.push(request.response);
+        } else {
+          console.log('can\'t put into a non-array', request);
+        }
+        return;
+      }
+
+      if (typeof request.response === "object") {
+        Object.assign(leaf, request.response);
+        return;
+      }
+
+      // back up to the parent
+      if (request.path.length < 1 || stack.length < 2) {
+        console.log('can\'t handle request due to empty path', request);
+        return;
+      }
+
+      parent = stack[stack.length - 2];
+      child_name = request.path[request.path.length - 1];
+
+      parent[child_name] = request.response;
+    }
+
+    function parseDelete(stack, remaining, request) {
+      if (remaining.length > 0) {
+        console.log('nothing to delete');
+        return; // already deleted
+      }
+
+      if (request.path.length < 1 || stack.length < 2) {
+        console.log('can\'t handle request due to empty path', request);
+        return;
+      }
+
+      parent = stack[stack.length - 2];
+      child_name = request.path[request.path.length - 1];
+
+      if (typeof parent.length === 'number') {
+        var index = 0;
+        try {
+          index = parseInt(child_name, 10);
+        } catch(ex) {
+          console.log('index to array not an integer', child_name);
+          return;
+        }
+
+        if (index < 0 || index >= parent.length) {
+          console.log('index out of bounds', index);
+          return;
+        }
+        parent = parent.splice(index, 1);
+      } else {
+        delete parent[child_name];
+      }
+    }
+
+    function onload() {
+      console.log('loading...');
+
+      var ws = new WebSocket('ws://' + window.location.host + '/socket');
+      ws.onopen = function(evt) {
+        console.log('socket open', evt);
+        ws.onmessage = function(evt) {
+          console.log(JSON.parse(evt.data));
+          ParseRequest(data, JSON.parse(evt.data));
+        };
+        ws.send(JSON.stringify({
+          method: 'GET',
+          path: []
+        }));
+      };
+    }
+  </script>
+</head>
+<body onload="onload()">
+</body>
+</html>
